@@ -92,6 +92,7 @@ Tensor reduction macro:
     @reduce G[] := sum(i,j)  B[i] + γ * D[j]      # F == G[]
 
 Complete reduction to a scalar output `F`, or a zero-dim array `G`.
+`G[]` involves `sum(A, dims=(1,2))` rather than `sum(A)`.
 
     @reduce Z[k] := sum(i,j) A[i] * B[j] * C[k]  lazy, i:N, j:N, k:N
 
@@ -239,7 +240,7 @@ function _macro(exone, extwo=nothing, exthree=nothing; reduce=false, icheck=fals
 
     #===== almost done =====#
 
-    # packagecheck(flags, where) # disabled for issue #2
+    packagecheck(flags, where) # disabled for issue #2
 
     canonsize = sizeinfer(store, canon, where, true)
 
@@ -479,7 +480,9 @@ function inputex(A, inex, target, flags, store, icheck, where)
 
     numB = count(!isequal(:), getB)
     if numB > 0                                             # A[_,i]
-        if needview!(getB)
+        if numB == length(getB) # then all indices are fixed
+            ex = :( $ex[$(getB...)] )
+        elseif needview!(getB) # then at least one index fixed and not _
             ex = :(view($ex, $(getB...) ))
         else
             ex = :(TensorCast.rview($ex, $(getB...) )) # really a reshape
@@ -564,7 +567,7 @@ function inputex(A, inex, target, flags, store, icheck, where)
         end
     end
 
-    if length(flatE) != length(target)                      # A[i] + B[j]
+    if length(flatE) != length(target) && dirs != 1:length(dirs) # A[i] + B[j]
         codeH = repeat(Any[*],length(target))
         codeH[dirs] .= (:)
         ex = :( TensorCast.orient($ex, $(codeH...,)) )
@@ -595,7 +598,9 @@ function outputnew(newright, (redUind, negV, codeW, indW, sizeX, getY, numY, ind
         ex = :( reverse($ex, dims=$d) )
     end
 
-    if :reduce in flags                                     # := sum(i)
+    if :reduce in flags && :scalar in flags                 # Z = @reduce sum(i) ...
+        ex = :( $redfun($ex) )
+    elseif :reduce in flags                                 # Z[i] := sum(j) ...
         rdims = Tuple([findcheck(i, canon, where) for i in redUind])
         if length(rdims)==1
             rdims = first(rdims)
@@ -646,10 +651,6 @@ function outputnew(newright, (redUind, negV, codeW, indW, sizeX, getY, numY, ind
         m_error("can't do what you ask without copying, sorry", where)
     elseif :mustview in flags && :broadcast in flags
         m_error("can't broadcast without copying, sorry", where)
-    end
-
-    if :scalar in flags                                     # Z = @reduce sum(i) ...
-        ex = :( first($ex) )
     end
 
     # if :strided in flags
@@ -790,25 +791,26 @@ function anoninput(rightnames, where)
 end
 
 function packagecheck(flags, where)
-    # thanks to LazyArrays, StaticArrays is always defined here, so check caller's scope?
-    if :staticslice in flags || :staticglue in flags && where != nothing
+    where === nothing && return
+    # now check in caller's scope?
+    if :staticslice in flags || :staticglue in flags
         isdefined(where.mod, :StaticArrays) || m_error("can't use static arrays without using StaticArrays", where)
     end
     if :strided in flags
-        isdefined(TensorCast, :Strided) || m_error("can't use option strided without using Strided", where)
+        isdefined(where.mod, :Strided) || m_error("can't use option strided without using Strided", where)
     end
     if :julienne in flags
-        isdefined(TensorCast, :JuliennedArrays) || m_error("can't use option julienne without using JuliennedArrays", where)
+        isdefined(where.mod, :JuliennedArrays) || m_error("can't use option julienne without using JuliennedArrays", where)
     end
     if :named in flags
-        isdefined(TensorCast, :NamedArrays) || m_error("can't use option named without using NamedArrays", where)
+        isdefined(where.mod, :NamedArrays) || m_error("can't use option named without using NamedArrays", where)
     end
     # if :axis in flags
-    #     isdefined(TensorCast, :AxisArrays) || m_error("can't use option axis without using AxisArrays", where)
+    #     isdefined(where.mod, :AxisArrays) || m_error("can't use option axis without using AxisArrays", where)
     # end
 end
 
-using LazyArrays # now not optional, and thus not always in caller's scope
+using LazyArrays # for BroadcastArray
 
 using LinearAlgebra  # for diag()
 
