@@ -108,19 +108,18 @@ Use the macro `@pretty` to print out the generated expression:
 #     A = sliceview(emu, (:, :, *))
 # end
 
-@pretty @reduce V[r] = sum(c) exp( fun(M)[r,c]^2 / R[c]' ) * D[c,c]
+@pretty @reduce V[r] = sum(c) exp( fun(M)[r,c]^2 / R[c]' )
 # begin
-#     local bat = fun(M)  # your animals may vary
-#     local hare = orient(R, (*, :))
-#     local zebra = orient(diag(D), (*, :))
-#     sum!(V, (*).(exp.((/).((^).(bat, 2), Base.conj.(hare))), zebra))
+#     local kangaroo = fun(M)  # your animals may vary
+#     local turtle = orient(R, (*, :))
+#     sum!(V, @__dot__(exp(kangaroo ^ 2 / conj(turtle))))
 # end
 ```
 
 Here `TensorCast.sliceview(D, (:,:,*)) = collect(eachslice(D, dims=3))`, 
 and  `TensorCast.orient(R, (*,:))` will reshape or tranpose `R` to lie long the second direction. 
-Notice that `R[c]'` means element-wise complex conjugation,
-and `D[c,c]` means `diag(D)` -- this is the only repeated index allowed. 
+Notice that `R[c]'` means element-wise complex conjugation, 
+applied by `@__dot__` (also written `@.`).
 
 (`@pretty` is just a variant of the built-in `@macroexpand1`, with animal names from
 [MacroTools.jl](https://github.com/MikeInnes/MacroTools.jl) in place of generated symbols.)
@@ -261,13 +260,28 @@ To disable the default use of `PermutedDimsArray` etc, give the option `nolazy`:
 ```julia
 @pretty @cast Z[y,x] := M[x,-y]  nolazy
 # Z = reverse(permutedims(M), dims=1)
+
 @pretty @cast Z[y,x] := M[x,-y] 
-# Z = Reverse{1}(PermutedDimsArray(M, (2, 1)))
-@pretty @cast Z[y,x] |= M[x,-y]
-# Z = copy(Reverse{1}(PermutedDimsArray(M, (2, 1))))
+# Z = Reverse{1}(PermuteDims(M))
 ```
 
-Here `TensorCast.Reverse{1}(B)` creates a view, with `reverse(axes(B,1))`.
+This also controls how the extraction of diagonal elements
+and creation of diagonal matrices are done:
+
+```julia
+@pretty @cast M[i,i] := A[i,i]  nolazy
+# M = diagm(0 => diag(A))
+
+@pretty @cast D[i,i] := A[i,i]
+# D = Diagonal(diagview(A))
+
+@pretty @cast M[i,i] = A[i,i]  nolazy  # into diagonal of existing matrix M
+# copyto!(diagview(M), diag(A)); M
+```
+
+Here `TensorCast.Reverse{1}(B)` creates a view with `reverse(axes(B,1))`. 
+`TensorCast.PermuteDims(M)` is `transpose(M)` on a matrix of numbers, else `PermutedDimsArray`.
+And `TensorCast.diagview(A)` is something like `view(A, 1:rows+1:end)`.
 
 ## Caveat Emptor
 
@@ -285,9 +299,9 @@ For example, this is `Σᵢ Aᵢ log(Σⱼ Aⱼ exp(Bᵢⱼ))` with `caribou[i]`
 # begin
 #     local kangaroo = begin
 #         local turtle = orient(A, (*, :))
-#         caribou = dropdims(sum((*).(turtle, exp.(B)), dims=2), dims=2)
+#         caribou = dropdims(sum(@__dot__(turtle * exp(B)), dims=2), dims=2)
 #     end
-#     mallard = sum((*).(A, log.(kangaroo)))
+#     mallard = sum(@__dot__(A * log(kangaroo)))
 # end
 ```
 
@@ -316,10 +330,10 @@ But this still has some errors (especially with `Vector * Matrix` cases).
 Also a little experimental, you can make functions with `=>`, like this:
 
 ```julia
-@pretty @cast A[i,j] + 3 + B[j,j]^2 => Z[i,j]  nolazy
+@pretty @cast A[i,j] + 3 + B[j,j]^2 => Z[i,j]
 # (A, B) -> begin
-#     local herring = orient(diag(B), (*, :))
-#     Z = (+).(A, 3, (^).(herring, 2))
+#     local herring = orient(diagview(B), (*, :))
+#     Z = @__dot__(A + 3 + herring ^ 2)
 # end
 ```
 
