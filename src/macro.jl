@@ -705,8 +705,10 @@ function outputnew(newright, (redUind, negV, codeW, indW, sizeX, getY, numY, ind
         end
     end
 
-    if :named in flags                                      # Z[i] := ... named
+    if :namedarray in flags                                 # Z[i] := ... named
         ex = :( TensorCast.namedarray($ex, $(indZ...,) ) )
+    elseif :nameddims in flags || :named in flags
+        ex = :( NamedDims.NamedDimsArray{$(indZ...,)}($ex) )
     # elseif :axis in flags
     #     ex = :( TensorCast.axisarray($ex, $(indZ...,) ) )
     end
@@ -858,9 +860,6 @@ function anoninput(rightnames, where)
     end
 end
 
-using LazyArrays
-using LazyArrays: lazy
-
 using LinearAlgebra  # for diag()
 
 function packagecheck(flags, where)
@@ -875,8 +874,11 @@ function packagecheck(flags, where)
     if :julienne in flags
         isdefined(where.mod, :JuliennedArrays) || m_error("can't use option julienne without using JuliennedArrays", where)
     end
-    if :named in flags
-        isdefined(where.mod, :NamedArrays) || m_error("can't use option named without using NamedArrays", where)
+    if :namedarray in flags
+        isdefined(where.mod, :NamedArrays) || m_error("can't use option namedarray without using NamedArrays", where)
+    end
+    if :named in flags || :nameddims in flags
+        isdefined(where.mod, :NamedDims) || m_error("can't use option nameddims without using NamedDims", where)
     end
     # if :axis in flags
     #     isdefined(where.mod, :AxisArrays) || m_error("can't use option axis without using AxisArrays", where)
