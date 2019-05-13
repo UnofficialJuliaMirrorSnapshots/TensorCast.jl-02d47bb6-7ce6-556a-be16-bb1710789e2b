@@ -1,6 +1,7 @@
 using Einsum
+using LinearAlgebra
 
-@testset "matmul" begin 
+@testset "simple" begin
 
     ## the very basics
     bc = rand(2,3)
@@ -13,8 +14,27 @@ using Einsum
     @mul B[b,d] = bc[b,c] * cd[c,d] # in-place
     @test B == A
 
+    ## and with vectors
+    c = randn(3)
+    @mul b[b] := bc[b,c] * c[c]
+    @test b == bc * c
 
-    ## check permutedims
+    @mul c[c] := b[b] * bc[b,c]
+    @test c == vec(b' * bc)
+
+    @mul z[] := b[b] * b[b]
+    @test z[] == dot(b,b)
+
+    b′ = similar(b)
+    @mul b′[b] = bc[b,c] * c[c] # in-place
+    @test b′ == bc * c
+
+    c′ = similar(c)
+    @mul c′[c] = b[b] * bc[b,c]
+
+end
+@testset "permutedims" begin
+
     bbb = rand(2,2,2);
     bbb2 = randn(2,2,2);
 
@@ -51,7 +71,7 @@ using Einsum
     @test A ≈ D
 
 
-    @mul    A[i,j,k,l] := cccc[i,x,y,k] * cccc2[l,j,y,x] 
+    @mul    A[i,j,k,l] := cccc[i,x,y,k] * cccc2[l,j,y,x]
     @reduce B[i,j,k,l] := sum(x,y) cccc[i,x,y,k] * cccc2[l,j,y,x]
     @einsum C[i,j,k,l] := cccc[i,x,y,k] * cccc2[l,j,y,x]
     @test A ≈ B ≈ C
@@ -61,19 +81,66 @@ using Einsum
     @test A ≈ D
 
 
-    @mul    A[i,j,k,l,m,n] := cccc[x,k,i,m] * cccc2[l,x,j,n] 
-    @reduce B[i,j,k,l,m,n] := sum(x) cccc[x,k,i,m] * cccc2[l,x,j,n] 
-    @einsum C[i,j,k,l,m,n] := cccc[x,k,i,m] * cccc2[l,x,j,n] 
+    @mul    A[i,j,k,l,m,n] := cccc[x,k,i,m] * cccc2[l,x,j,n]
+    @reduce B[i,j,k,l,m,n] := sum(x) cccc[x,k,i,m] * cccc2[l,x,j,n]
+    @einsum C[i,j,k,l,m,n] := cccc[x,k,i,m] * cccc2[l,x,j,n]
     @test A ≈ B  ≈ C
 
     D = similar(A);
     @mul    D[i,j,k,l,m,n] = cccc[x,k,i,m] * cccc2[l,x,j,n]  # in-place
-    @test A ≈ D 
+    @test A ≈ D
 
+
+    ## repeat with non-alphabeitcal LHS!
+    @mul    A[j,i,l,k,n,m] := cccc[x,k,i,m] * cccc2[l,x,j,n]
+    @reduce B[j,i,l,k,n,m] := sum(x) cccc[x,k,i,m] * cccc2[l,x,j,n]
+    @einsum C[j,i,l,k,n,m] := cccc[x,k,i,m] * cccc2[l,x,j,n]
+    @test A ≈ B  ≈ C
+
+    D = similar(A);
+    @mul    D[j,i,l,k,n,m] = cccc[x,k,i,m] * cccc2[l,x,j,n]  # in-place
+    @test A ≈ D
+
+
+    ## Mason Potter's example:
+    # W = rand(2,2,2,2); M = rand(2,2,2);
+    W = rand(6,7,4,5); M = rand(7,2,3);
+
+    @reduce N[σ, b\a, b′\a′] := sum(σ′) W[σ,σ′,b,b′] * M[σ′,a,a′]
+    @mul N2[σ, b\a, b′\a′] := W[σ,σ′,b,b′] * M[σ′,a,a′]
+    @test N ≈ N2
+
+    @reduce R[σ, b,a, b′\a′] := sum(σ′) W[σ,σ′,b,b′] * M[σ′,a,a′]  lazy
+    @mul R2[σ, b,a, b′\a′] := W[σ,σ′,b,b′] * M[σ′,a,a′]
+    @test R ≈ R2
+    # invperm((4,2,1,3)) == (3, 2, 4, 1)
+
+    @reduce S[σ, b,a, b′,a′] := sum(σ′) W[σ,σ′,b,b′] * M[σ′,a,a′]
+    @mul S2[σ, b,a, b′,a′] := W[σ,σ′,b,b′] * M[σ′,a,a′]
+    @test S ≈ S2
+    # invperm((4,2,1,3,5)) == (3, 2, 4, 1, 5)
+
+    ## in-place version
+    N3 = similar(N); N4 = similar(N);
+    @reduce N3[σ, b\a, b′\a′] = sum(σ′) W[σ,σ′,b,b′] * M[σ′,a,a′]  lazy
+    @mul N4[σ, b\a, b′\a′] = W[σ,σ′,b,b′] * M[σ′,a,a′]
+    @test N ≈ N3 ≈ N4
+
+
+    ## these were OK:
+    M = rand(3,3,3);
+
+    @reduce Q[σ, b\a, a′] := sum(σ′) M[σ,σ′,b] * M[σ′,a,a′];
+    @mul Q2[σ, b\a, a′] := M[σ,σ′,b] * M[σ′,a,a′];
+    @test Q ≈ Q2
+
+    @reduce Q3[σ, b,a, a′] := sum(σ′) M[σ,σ′,b] * M[σ′,a,a′];
+    @mul    Q4[σ, b,a, a′] := sum(σ′) M[σ,σ′,b] * M[σ′,a,a′];
+    @test Q3 ≈ Q4
 
 end
-@testset "in & out shapes" begin 
-    
+@testset "in & out shapes" begin
+
     bc = rand(2,3)
     cd = rand(3,4)
 
@@ -93,8 +160,8 @@ end
     @test D == C
 
 end
-@testset "batch" begin 
-    
+@testset "batch" begin
+
     bbb = rand(2,2,2)
     bbb2 = randn(2,2,2)
 
@@ -112,7 +179,7 @@ end
     @test A == D == E == F
 
 
-    ## permute 
+    ## permute
     @mul A[n,k,i] := bbb[i,j,n] * bbb2[n,k,j]
     @reduce B[n,k,i] := sum(j) bbb[i,j,n] * bbb2[n,k,j]
     @einsum C[n,k,i] := bbb[i,j,n] * bbb2[n,k,j]
@@ -127,9 +194,9 @@ end
     @test A == D == E == F
 
     ## readme & help
-    X = rand(2,3,4) 
-    Y = rand(3,2,4) 
-    @mul W[β][i,j] := X[i,k,β] * Y[k,j,β] 
+    X = rand(2,3,4)
+    Y = rand(3,2,4)
+    @mul W[β][i,j] := X[i,k,β] * Y[k,j,β]
     @test W[2] ≈ X[:,:,2] * Y[:,:,2]
 
     B = rand(8)
@@ -138,5 +205,20 @@ end
     rB = reshape(B,2,4)
     @einsum D[i,j] := rB[i,k] * C[j,2,k]
     @test A[1,2] ≈ D[2,:]
+
+end
+@testset "recursion" begin
+
+    A = rand(2,3); B = rand(3,4); C = rand(4,5);
+
+    @einsum V[i,l] := A[i,j] * B[j,k] * C[k,l]
+    @reduce V2[i,l] := sum(j,k) A[i,j] * B[j,k] * C[k,l]
+
+    @reduce W[i,l] := sum(j) A[i,j] * @mul [j,l] := B[j,k] * C[k,l]
+
+    # @mul W2[i,l] := sum(j) A[i,j] * @mul [j,l] := B[j,k] * C[k,l]
+    # maybe I decided not to allow this for now.
+
+    @test V ≈ V2 ≈ W #≈ W2
 
 end
